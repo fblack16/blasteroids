@@ -7,36 +7,39 @@
 #define DISPLAY_HEIGHT 480
 #define FPS 30
 
-struct key {
+struct keystate {
 	unsigned int is_pressed: 1;
 	unsigned int needs_processing: 1;
 };
-typedef struct key Key;
+typedef struct keystate KeyState;
+
+struct game_state {
+	ALLEGRO_DISPLAY* display_ptr;
+	ALLEGRO_EVENT_QUEUE* event_queue_ptr;
+	ALLEGRO_TIMER* timer_ptr;
+	KeyState key_states[ALLEGRO_KEY_MAX];
+};
+typedef struct game_state GameState;
 
 void error(char* message);
 void initialize_allegro();
 void initialize_keyboard();
 ALLEGRO_DISPLAY* initialize_display();
 ALLEGRO_EVENT_QUEUE* initialize_event_queue();
+ALLEGRO_TIMER* initialize_timer();
+GameState initialize_game_state();
+void destroy_game_state(GameState* game_state_ptr);
+bool is_pressed_or_needs_processing(KeyState key_states[], int keycode);
+void unset_is_pressed(KeyState key_states[]);
 
 int main(int argc, char** argv) {
 
 	initialize_allegro();
 	initialize_keyboard();
-	ALLEGRO_DISPLAY* display_ptr = initialize_display();
 
-	ALLEGRO_EVENT_QUEUE* event_queue_ptr = initialize_event_queue();
-	ALLEGRO_TIMER* timer_ptr = al_create_timer(ALLEGRO_BPM_TO_SECS(FPS));
-	// Register keyboard as event source with the event queue
-	al_register_event_source(event_queue_ptr, al_get_keyboard_event_source());
-	al_register_event_source(event_queue_ptr, al_get_timer_event_source(timer_ptr));
-
-	// Keypress array
-	Key keys[ALLEGRO_KEY_MAX];
-	Key key = {.is_pressed = 0, .needs_processing = 0};
-	for (int i = 0; i < ALLEGRO_KEY_MAX; ++i) {
-		keys[i] = key;
-	}
+	GameState game_state = initialize_game_state();
+	al_register_event_source(game_state.event_queue_ptr, al_get_keyboard_event_source());
+	al_register_event_source(game_state.event_queue_ptr, al_get_timer_event_source(game_state.timer_ptr));
 
 	unsigned char red = 0;
 	unsigned char green = 0;
@@ -47,31 +50,29 @@ int main(int argc, char** argv) {
 
 	bool running = true;
 	bool needs_redraw = true;
-	al_start_timer(timer_ptr);
+	al_start_timer(game_state.timer_ptr);
 	while (running) {
-		al_wait_for_event(event_queue_ptr, &event);
+		al_wait_for_event(game_state.event_queue_ptr, &event);
 
 		double start_time = al_get_time();
 		switch (event.type) {
 			case ALLEGRO_EVENT_TIMER:
-				if ((keys[ALLEGRO_KEY_R].is_pressed || keys[ALLEGRO_KEY_R].needs_processing) && red < 255) red++;
-				if ((keys[ALLEGRO_KEY_G].is_pressed || keys[ALLEGRO_KEY_G].needs_processing) && green < 255) green++;
-				if ((keys[ALLEGRO_KEY_B].is_pressed || keys[ALLEGRO_KEY_B].needs_processing) && blue < 255) blue++;
-				if (keys[ALLEGRO_KEY_ESCAPE].is_pressed || keys[ALLEGRO_KEY_ESCAPE].needs_processing) running = false;
+				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_R) && red < 255) red++;
+				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_G) && green < 255) green++;
+				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_B) && blue < 255) blue++;
+				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_ESCAPE)) running = false;
+				unset_is_pressed(game_state.key_states);
 
-				for (int i = 0; i < ALLEGRO_KEY_MAX; ++i) {
-					keys[i].needs_processing = 0;
-				}
 				needs_redraw = true;
 				break;
 
 			case ALLEGRO_EVENT_KEY_DOWN:
-				keys[event.keyboard.keycode].is_pressed = 1;
-				keys[event.keyboard.keycode].needs_processing = 1;
+				game_state.key_states[event.keyboard.keycode].is_pressed = 1;
+				game_state.key_states[event.keyboard.keycode].needs_processing = 1;
 				break;
 
 			case ALLEGRO_EVENT_KEY_UP:
-				keys[event.keyboard.keycode].is_pressed = 0;
+				game_state.key_states[event.keyboard.keycode].is_pressed = 0;
 				break;
 
 			case ALLEGRO_EVENT_DISPLAY_CLOSE:
@@ -86,7 +87,7 @@ int main(int argc, char** argv) {
 		// Then, we need to multiply all game computations (positions of objects, speeds) by the delta,
 		// and would need to adjust the timer queue.
 		// Problem: the difference in timer ticks only reflects whole frames, but not fractional frames.
-		if (needs_redraw && al_event_queue_is_empty(event_queue_ptr)) {
+		if (needs_redraw && al_event_queue_is_empty(game_state.event_queue_ptr)) {
 			al_clear_to_color(al_map_rgba(red, green, blue, alpha));
 			al_flip_display();
 			needs_redraw = false;
@@ -97,11 +98,7 @@ int main(int argc, char** argv) {
 		printf("Frame time: %.4f\n", frame_time);
 	}
 
-	// Destroy event queue
-	al_destroy_event_queue(event_queue_ptr);
-
-	// Destroy window
-	al_destroy_display(display_ptr);
+	destroy_game_state(&game_state);
 
 	// Uninstall allegro
 	al_uninstall_system();
@@ -141,4 +138,46 @@ ALLEGRO_EVENT_QUEUE* initialize_event_queue() {
 		exit(1);
 	}
 	return event_queue_ptr;
+}
+
+ALLEGRO_TIMER* initialize_timer() {
+	ALLEGRO_TIMER* timer_ptr = al_create_timer(ALLEGRO_BPM_TO_SECS(FPS));
+	if (!timer_ptr) {
+		error("Could not create timer!");
+		exit(1);
+	}
+	return timer_ptr;
+}
+
+GameState initialize_game_state() {
+	GameState game_state = {
+		.display_ptr = initialize_display(),
+		.event_queue_ptr = initialize_event_queue(),
+		.timer_ptr = initialize_timer(),
+	};
+	KeyState key_state = {.is_pressed = 0, .needs_processing = 0};
+	for (int i = 0; i < ALLEGRO_KEY_MAX; ++i) {
+		game_state.key_states[i] = key_state;
+	}
+	return game_state;
+}
+
+void destroy_game_state(GameState* game_state_ptr) {
+	al_destroy_display(game_state_ptr->display_ptr);
+	al_destroy_event_queue(game_state_ptr->event_queue_ptr);
+	al_destroy_timer(game_state_ptr->timer_ptr);
+}
+
+bool is_pressed_or_needs_processing(KeyState key_states[], int keycode) {
+	if (keycode < 0 || keycode >= ALLEGRO_KEY_MAX) {
+		error("Keycode is out of range!");
+		exit(1);
+	}
+	return (key_states[keycode].is_pressed || key_states[keycode].needs_processing);
+}
+
+void unset_is_pressed(KeyState key_states[]) {
+	for (int i = 0; i < ALLEGRO_KEY_MAX; ++i) {
+		key_states[i].is_pressed = 0;
+	}
 }
