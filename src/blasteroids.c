@@ -30,7 +30,7 @@ ALLEGRO_TIMER* initialize_timer();
 GameState initialize_game_state();
 void destroy_game_state(GameState* game_state_ptr);
 bool is_pressed_or_needs_processing(KeyState key_states[], int keycode);
-void unset_is_pressed(KeyState key_states[]);
+void unset_needs_processing(KeyState key_states[]);
 
 int main(int argc, char** argv) {
 
@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
 
 	bool running = true;
 	bool needs_redraw = true;
+	double frame_delta = 0.0;
 	al_start_timer(game_state.timer_ptr);
 	while (running) {
 		al_wait_for_event(game_state.event_queue_ptr, &event);
@@ -61,7 +62,9 @@ int main(int argc, char** argv) {
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_G) && green < 255) green++;
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_B) && blue < 255) blue++;
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_ESCAPE)) running = false;
-				unset_is_pressed(game_state.key_states);
+				unset_needs_processing(game_state.key_states);
+
+				printf("Red is %i, green is %i, blue is %i\n", red, green, blue);
 
 				needs_redraw = true;
 				break;
@@ -94,7 +97,11 @@ int main(int argc, char** argv) {
 		}
 		double end_time = al_get_time();
 		double frame_time = end_time - start_time;
-		if (frame_time > ALLEGRO_BPM_TO_SECS(FPS)) printf("Frameskip must occur!");
+		if (frame_time > ALLEGRO_BPS_TO_SECS(FPS)) {
+			printf("Frameskip must occur!\n");
+			frame_delta = frame_time - ALLEGRO_BPM_TO_SECS(FPS);
+			printf("Frame delta is %.4f\n", frame_delta);
+		}
 		printf("Frame time: %.4f\n", frame_time);
 	}
 
@@ -141,7 +148,7 @@ ALLEGRO_EVENT_QUEUE* initialize_event_queue() {
 }
 
 ALLEGRO_TIMER* initialize_timer() {
-	ALLEGRO_TIMER* timer_ptr = al_create_timer(ALLEGRO_BPM_TO_SECS(FPS));
+	ALLEGRO_TIMER* timer_ptr = al_create_timer(ALLEGRO_BPS_TO_SECS(FPS));
 	if (!timer_ptr) {
 		error("Could not create timer!");
 		exit(1);
@@ -176,8 +183,8 @@ bool is_pressed_or_needs_processing(KeyState key_states[], int keycode) {
 	return (key_states[keycode].is_pressed || key_states[keycode].needs_processing);
 }
 
-void unset_is_pressed(KeyState key_states[]) {
+void unset_needs_processing(KeyState key_states[]) {
 	for (int i = 0; i < ALLEGRO_KEY_MAX; ++i) {
-		key_states[i].is_pressed = 0;
+		key_states[i].needs_processing = 0;
 	}
 }
