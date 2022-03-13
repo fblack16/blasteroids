@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <errno.h>
 #include <allegro5/allegro.h>
 #include <allegro5/allegro_color.h>
@@ -19,6 +20,11 @@
 	{ .x = -0.5f, .y = 0.5f }, \
 }
 #define SPACESHIP_LINE_THICKNESS 2.0f
+
+#define FORWARD ALLEGRO_KEY_W
+#define BACK ALLEGRO_KEY_S
+#define LEFT ALLEGRO_KEY_A
+#define RIGHT ALLEGRO_KEY_D
 
 struct keystate {
 	unsigned int is_pressed: 1;
@@ -65,6 +71,7 @@ void add_point_2d(Point2D* self, Point2D* other);
 void draw_line(Point2D* start, Point2D* end, ALLEGRO_COLOR color, float thickness);
 Spaceship initialize_spaceship();
 void draw_spaceship(Spaceship* spaceship);
+void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_delta);
 
 int main(int argc, char** argv) {
 
@@ -98,11 +105,14 @@ int main(int argc, char** argv) {
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_G) && green < 255) green++;
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_B) && blue < 255) blue++;
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_ESCAPE)) running = false;
+
+				update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
 				unset_needs_processing(game_state.key_states);
 
 				printf("Red is %i, green is %i, blue is %i\n", red, green, blue);
 
 				needs_redraw = true;
+				frame_delta = 0.0; // reset frame delta
 				break;
 
 			case ALLEGRO_EVENT_KEY_DOWN:
@@ -278,4 +288,21 @@ void draw_spaceship(Spaceship* spaceship) {
 	draw_line(&spaceship->vertices[0], &spaceship->vertices[1], spaceship->color, SPACESHIP_LINE_THICKNESS);
 	draw_line(&spaceship->vertices[1], &spaceship->vertices[2], spaceship->color, SPACESHIP_LINE_THICKNESS);
 	draw_line(&spaceship->vertices[2], &spaceship->vertices[0], spaceship->color, SPACESHIP_LINE_THICKNESS);
+}
+
+void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_delta) {
+	if (is_pressed_or_needs_processing(key_states, FORWARD)) {
+		spaceship->position.x += (float)cos(spaceship->heading) * (1.0f + frame_delta);
+		spaceship->position.y += (float)sin(spaceship->heading) * (1.0f + frame_delta);
+	}
+	if (is_pressed_or_needs_processing(key_states, BACK)) {
+		spaceship->position.x -= (float)cos(spaceship->heading) * (1.0f + frame_delta);
+		spaceship->position.y -= (float)sin(spaceship->heading) * (1.0f + frame_delta);
+	}
+	if (is_pressed_or_needs_processing(key_states, LEFT)) {
+		spaceship->heading = (spaceship->heading - 0.1f * (1.0f + frame_delta));
+	}
+	if (is_pressed_or_needs_processing(key_states, RIGHT)) {
+		spaceship->heading = (spaceship->heading + 0.1f * (1.0f + frame_delta));
+	}
 }
