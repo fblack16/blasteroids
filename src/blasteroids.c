@@ -37,12 +37,25 @@ struct point_2d {
 	float y;
 };
 typedef struct point_2d Point2D;
+typedef Point2D Position;
+
+struct display_coordinates {
+	float x;
+	float y;
+};
+typedef struct display_coordinates DisplayCoordinates;
+
+struct world_coordinates {
+	float x;
+	float y;
+};
+typedef struct world_coordinates WorldCoordinates;
 
 struct spaceship {
-	Point2D position;
+	DisplayCoordinates display_coordinates;
 	float heading;
 	ALLEGRO_COLOR color;
-	Point2D vertices[3];
+	DisplayCoordinates vertices[3];
 };
 typedef struct spaceship Spaceship;
 
@@ -66,12 +79,16 @@ GameState initialize_game_state();
 void destroy_game_state(GameState* game_state_ptr);
 bool is_pressed_or_needs_processing(KeyState key_states[], int keycode);
 void unset_needs_processing(KeyState key_states[]);
-void add_point_2d(Point2D* self, Point2D* other);
-void add_point_2d(Point2D* self, Point2D* other);
-void draw_line(Point2D* start, Point2D* end, ALLEGRO_COLOR color, float thickness);
+void add_point_2d(Position* self, Position* other);
+void subtract_point_2d(Position* self, Position* other);
+void draw_line(Position* start, Position* end, ALLEGRO_COLOR color, float thickness);
 Spaceship initialize_spaceship();
 void draw_spaceship(Spaceship* spaceship);
 void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_delta);
+void map_world_coordinates_to_screen(WorldCoordinates* world_coordinates);
+void map_display_coordinates_to_screen(DisplayCoordinates* display_coordinates);
+WorldCoordinates map_display_coordinates_to_world_coordinates(DisplayCoordinates* display_coordinates);
+DisplayCoordinates map_world_coordinates_to_display_coordinates(WorldCoordinates* world_coordinates);
 
 int main(int argc, char** argv) {
 
@@ -247,23 +264,27 @@ void unset_needs_processing(KeyState key_states[]) {
 	}
 }
 
-void add_point_2d(Point2D* self, Point2D* other) {
+void add_point_2d(Position* self, Position* other) {
 	self->x += other->x;
 	self->y += other->y;
 }
 
-void subtract_point_2d(Point2D* self, Point2D* other) {
+void subtract_point_2d(Position* self, Position* other) {
 	self->x -= other->x;
 	self->y -= other->y;
 }
 
-void draw_line(Point2D* start, Point2D* end, ALLEGRO_COLOR color, float thickness) {
+void draw_line_in_display_coordinates(DisplayCoordinates* start, DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness) {
+	al_draw_line(start->x, start->y, end->x, end->y, color, thickness);
+}
+
+void draw_line_in_world_coordinates(WorldCoordinates* start, WorldCoordinates* end, ALLEGRO_COLOR color, float thickness) {
 	al_draw_line(start->x, start->y, end->x, end->y, color, thickness);
 }
 
 Spaceship initialize_spaceship() {
 	Spaceship spaceship = {
-		.position = { .x = 0.0f, .y = 0.0f },
+		.display_coordinates = { .x = 0.0f, .y = 0.0f },
 		.heading = 0.0f,
 		.color = al_color_name(SPACESHIP_COLOR),
 		.vertices = SPACESHIP_VERTICES,
@@ -280,24 +301,25 @@ Spaceship initialize_spaceship() {
 }
 
 void draw_spaceship(Spaceship* spaceship) {
+	WorldCoordinates world_coordinates = map_display_coordinates_to_world_coordinates(&spaceship->display_coordinates);
 	ALLEGRO_TRANSFORM transform;
 	al_identity_transform(&transform);
 	al_rotate_transform(&transform, spaceship->heading);
-	al_translate_transform(&transform, spaceship->position.x + (float)DISPLAY_OFFSET_X, spaceship->position.y + (float)DISPLAY_OFFSET_Y);
+	al_translate_transform(&transform, world_coordinates.x, world_coordinates.y);
 	al_use_transform(&transform);
-	draw_line(&spaceship->vertices[0], &spaceship->vertices[1], spaceship->color, SPACESHIP_LINE_THICKNESS);
-	draw_line(&spaceship->vertices[1], &spaceship->vertices[2], spaceship->color, SPACESHIP_LINE_THICKNESS);
-	draw_line(&spaceship->vertices[2], &spaceship->vertices[0], spaceship->color, SPACESHIP_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&spaceship->vertices[0], &spaceship->vertices[1], spaceship->color, SPACESHIP_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&spaceship->vertices[1], &spaceship->vertices[2], spaceship->color, SPACESHIP_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&spaceship->vertices[2], &spaceship->vertices[0], spaceship->color, SPACESHIP_LINE_THICKNESS);
 }
 
 void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_delta) {
 	if (is_pressed_or_needs_processing(key_states, FORWARD)) {
-		spaceship->position.x += (float)cos(spaceship->heading) * (1.0f + frame_delta);
-		spaceship->position.y += (float)sin(spaceship->heading) * (1.0f + frame_delta);
+		spaceship->display_coordinates.x += (float)cos(spaceship->heading) * (1.0f + frame_delta);
+		spaceship->display_coordinates.y += (float)sin(spaceship->heading) * (1.0f + frame_delta);
 	}
 	if (is_pressed_or_needs_processing(key_states, BACK)) {
-		spaceship->position.x -= (float)cos(spaceship->heading) * (1.0f + frame_delta);
-		spaceship->position.y -= (float)sin(spaceship->heading) * (1.0f + frame_delta);
+		spaceship->display_coordinates.x -= (float)cos(spaceship->heading) * (1.0f + frame_delta);
+		spaceship->display_coordinates.y -= (float)sin(spaceship->heading) * (1.0f + frame_delta);
 	}
 	if (is_pressed_or_needs_processing(key_states, LEFT)) {
 		spaceship->heading = (spaceship->heading - 0.1f * (1.0f + frame_delta));
@@ -305,4 +327,36 @@ void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_d
 	if (is_pressed_or_needs_processing(key_states, RIGHT)) {
 		spaceship->heading = (spaceship->heading + 0.1f * (1.0f + frame_delta));
 	}
+	WorldCoordinates world_coordinates = map_display_coordinates_to_world_coordinates(&spaceship->display_coordinates);
+	map_world_coordinates_to_screen(&world_coordinates);
+	spaceship->display_coordinates = map_world_coordinates_to_display_coordinates(&world_coordinates);
+}
+
+void map_world_coordinates_to_screen(WorldCoordinates* world_coordinates) {
+	if (world_coordinates->x < 0.0f) world_coordinates->x = (float)DISPLAY_WIDTH;
+	if (world_coordinates->x > (float)DISPLAY_WIDTH) world_coordinates->x = 0.0f;
+	if (world_coordinates->y < 0.0f) world_coordinates->y = (float)DISPLAY_HEIGHT;
+	if (world_coordinates->y > (float)DISPLAY_HEIGHT) world_coordinates->y = 0.0f;
+}
+
+void map_display_coordinates_to_screen(DisplayCoordinates* display_coordinates) {
+	WorldCoordinates world_coordinates = map_display_coordinates_to_world_coordinates(display_coordinates);
+	map_world_coordinates_to_screen(&world_coordinates);
+	*display_coordinates = map_world_coordinates_to_display_coordinates(&world_coordinates);
+}
+
+WorldCoordinates map_display_coordinates_to_world_coordinates(DisplayCoordinates* display_coordinates) {
+	WorldCoordinates world_coordinates = {
+		.x = display_coordinates->x + (float)DISPLAY_OFFSET_X,
+		.y = display_coordinates->y + (float)DISPLAY_OFFSET_Y,
+	};
+	return world_coordinates;
+}
+
+DisplayCoordinates map_world_coordinates_to_display_coordinates(WorldCoordinates* world_coordinates) {
+	DisplayCoordinates display_coordinates = {
+		.x = world_coordinates->x - (float)DISPLAY_OFFSET_X,
+		.y = world_coordinates->y - (float)DISPLAY_OFFSET_Y,
+	};
+	return display_coordinates;
 }
