@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <errno.h>
@@ -8,8 +9,8 @@
 
 #define DISPLAY_WIDTH 640
 #define DISPLAY_HEIGHT 480
-#define DISPLAY_OFFSET_X DISPLAY_WIDTH / 2
-#define DISPLAY_OFFSET_Y DISPLAY_HEIGHT / 2
+#define DISPLAY_OFFSET_X (DISPLAY_WIDTH / 2)
+#define DISPLAY_OFFSET_Y (DISPLAY_HEIGHT / 2)
 #define FPS 30
 
 #define SPACESHIP_SCALE_FACTOR 20.0f
@@ -30,7 +31,7 @@
 	{ .x = 0.0f, .y = -0.5f }, \
 }
 #define ASTEROID_LINE_THICKNESS 2.0f
-#define ASTEROID_MAX 1
+#define ASTEROID_MAX 10
 
 #define FORWARD ALLEGRO_KEY_W
 #define BACK ALLEGRO_KEY_S
@@ -42,13 +43,6 @@ struct keystate {
 	unsigned int needs_processing: 1;
 };
 typedef struct keystate KeyState;
-
-struct point_2d {
-	float x;
-	float y;
-};
-typedef struct point_2d Point2D;
-typedef Point2D Position;
 
 struct display_coordinates {
 	float x;
@@ -94,13 +88,19 @@ struct asteroid {
 };
 typedef struct asteroid Asteroid;
 
+struct asteroid_container {
+	bool is_in_use;
+	Asteroid asteroid;
+};
+typedef struct asteroid_container AsteroidContainer;
+
 struct game_state {
 	ALLEGRO_DISPLAY* display_ptr;
 	ALLEGRO_EVENT_QUEUE* event_queue_ptr;
 	ALLEGRO_TIMER* timer_ptr;
 	KeyState key_states[ALLEGRO_KEY_MAX];
 	Spaceship spaceship;
-	Asteroid asteroids[ASTEROID_MAX];
+	AsteroidContainer asteroid_containers[ASTEROID_MAX];
 };
 typedef struct game_state GameState;
 
@@ -115,9 +115,6 @@ GameState initialize_game_state();
 void destroy_game_state(GameState* game_state_ptr);
 bool is_pressed_or_needs_processing(KeyState key_states[], int keycode);
 void unset_needs_processing(KeyState key_states[]);
-void add_point_2d(Position* self, Position* other);
-void subtract_point_2d(Position* self, Position* other);
-void draw_line(Position* start, Position* end, ALLEGRO_COLOR color, float thickness);
 Spaceship initialize_spaceship();
 void draw_spaceship(Spaceship* spaceship);
 void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_delta);
@@ -130,15 +127,21 @@ DisplayCoordinates map_mathematical_coordinates_to_display_coordinates(Mathemati
 MathematicalCoordinates map_world_coordinates_to_mathematical_coordinates(WorldCoordinates* world_coordinates);
 WorldCoordinates map_mathematical_coordinates_to_world_coordinates(MathematicalCoordinates* mathematical_coordinates);
 Asteroid initialize_asteroid();
-void draw_asteroid(Asteroid* asteroid);
-void draw_asteroids(Asteroid asteroids[]);
-void update_asteroid(Asteroid* asteroid, float frame_delta);
-void update_asteroids(Asteroid asteroids[], float frame_delta);
+void draw_asteroid(AsteroidContainer* asteroid_container);
+void draw_asteroids(AsteroidContainer asteroid_containers[]);
+void update_asteroid(AsteroidContainer* asteroid_container, float frame_delta);
+void update_asteroids(AsteroidContainer asteroid_containers[], float frame_delta);
 bool circles_collide(Circle* first, Circle* second);
 WorldCoordinates subtract_world_coordinates(WorldCoordinates* first, WorldCoordinates* second);
 float absolute_value_of_world_coordinates(WorldCoordinates* world_coordinates);
+AsteroidContainer initialize_asteroid_container(Asteroid* asteroid);
+void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* asteroid);
+void drain_asteroid_container(AsteroidContainer* asteroid_container);
 
 int main(int argc, char** argv) {
+
+	// seed random number generator
+	srand(0);
 
 	initialize_allegro();
 	initialize_allegro_primitives();
@@ -164,7 +167,7 @@ int main(int argc, char** argv) {
 				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_ESCAPE)) running = false;
 
 				update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
-				update_asteroids(game_state.asteroids, (float)frame_delta);
+				update_asteroids(game_state.asteroid_containers, (float)frame_delta);
 				unset_needs_processing(game_state.key_states);
 
 				//printf("Red is %i, green is %i, blue is %i\n", red, green, blue);
@@ -197,7 +200,7 @@ int main(int argc, char** argv) {
 		if (needs_redraw && al_event_queue_is_empty(game_state.event_queue_ptr)) {
 			al_clear_to_color(al_color_name("black"));
 			draw_spaceship(&game_state.spaceship);
-			draw_asteroids(game_state.asteroids);
+			draw_asteroids(game_state.asteroid_containers);
 			al_flip_display();
 			needs_redraw = false;
 		}
@@ -285,7 +288,8 @@ GameState initialize_game_state() {
 	}
 
 	for (int i = 0; i < ASTEROID_MAX; ++i) {
-		game_state.asteroids[i] = initialize_asteroid();
+		Asteroid asteroid = initialize_asteroid();
+		game_state.asteroid_containers[i] = initialize_asteroid_container(&asteroid);
 	}
 
 	return game_state;
@@ -441,21 +445,19 @@ WorldCoordinates map_mathematical_coordinates_to_world_coordinates(MathematicalC
 }
 
 Asteroid initialize_asteroid() {
+	WorldCoordinates world_coordinates = {
+		.x = (float)(rand() % DISPLAY_WIDTH - DISPLAY_OFFSET_X),
+		.y = (float)(rand() % DISPLAY_HEIGHT - DISPLAY_OFFSET_Y),
+	};
 	Asteroid asteroid = {
-		.world_coordinates = {
-			.x = 10.0f,
-			.y = 10.0f,
-		},
-		.heading = 0.0f,
+		.world_coordinates = world_coordinates,
+		.heading = (float)(rand() % 36),
 		.rotation_angle = 0.0f,
 		.angle_velocity = 0.1f,
 		.color = al_color_name(ASTEROID_COLOR),
 		.vertices = ASTEROID_VERTICES,
 		.hitbox = {
-			.center = {
-				.x = 10.0f,
-				.y = 10.0f,
-			},
+			.center = world_coordinates,
 			.radius = 1.0f * ASTEROID_SCALE_FACTOR,
 		},
 	};
@@ -471,39 +473,39 @@ Asteroid initialize_asteroid() {
 	return asteroid;
 }
 
-void draw_asteroid(Asteroid* asteroid) {
-	DisplayCoordinates display_coordinates = map_world_coordinates_to_display_coordinates(&asteroid->world_coordinates);
+void draw_asteroid(AsteroidContainer* asteroid_container) {
+	DisplayCoordinates display_coordinates = map_world_coordinates_to_display_coordinates(&asteroid_container->asteroid.world_coordinates);
 	ALLEGRO_TRANSFORM transform;
 	al_identity_transform(&transform);
-	al_rotate_transform(&transform, asteroid->rotation_angle);
+	al_rotate_transform(&transform, asteroid_container->asteroid.rotation_angle);
 	al_translate_transform(&transform, display_coordinates.x, display_coordinates.y);
 	al_use_transform(&transform);
-	draw_line_in_display_coordinates(&asteroid->vertices[0], &asteroid->vertices[1], asteroid->color, ASTEROID_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&asteroid->vertices[1], &asteroid->vertices[2], asteroid->color, ASTEROID_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&asteroid->vertices[2], &asteroid->vertices[3], asteroid->color, ASTEROID_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&asteroid->vertices[3], &asteroid->vertices[0], asteroid->color, ASTEROID_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[0], &asteroid_container->asteroid.vertices[1], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[1], &asteroid_container->asteroid.vertices[2], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[2], &asteroid_container->asteroid.vertices[3], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[3], &asteroid_container->asteroid.vertices[0], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
 }
 
-void draw_asteroids(Asteroid asteroids[]) {
+void draw_asteroids(AsteroidContainer asteroid_containers[]) {
 	for (int i = 0; i < ASTEROID_MAX; ++i) {
-		draw_asteroid(asteroids + i);
+		draw_asteroid(asteroid_containers + i);
 	}
 }
 
-void update_asteroid(Asteroid* asteroid, float frame_delta) {
-	asteroid->world_coordinates.x += (float)cos(asteroid->heading) * (1.0f + frame_delta);
-	asteroid->world_coordinates.y += (float)sin(asteroid->heading) * (1.0f + frame_delta);
-	asteroid->rotation_angle += asteroid->angle_velocity;
+void update_asteroid(AsteroidContainer* asteroid_container, float frame_delta) {
+	asteroid_container->asteroid.world_coordinates.x += (float)cos(asteroid_container->asteroid.heading) * (1.0f + frame_delta);
+	asteroid_container->asteroid.world_coordinates.y += (float)sin(asteroid_container->asteroid.heading) * (1.0f + frame_delta);
+	asteroid_container->asteroid.rotation_angle += asteroid_container->asteroid.angle_velocity;
 
-	asteroid->hitbox.center.x = asteroid->world_coordinates.x;
-	asteroid->hitbox.center.y = asteroid->world_coordinates.y;
+	asteroid_container->asteroid.hitbox.center.x = asteroid_container->asteroid.world_coordinates.x;
+	asteroid_container->asteroid.hitbox.center.y = asteroid_container->asteroid.world_coordinates.y;
 
-	map_world_coordinates_to_screen(&asteroid->world_coordinates, asteroid->heading);
+	map_world_coordinates_to_screen(&asteroid_container->asteroid.world_coordinates, asteroid_container->asteroid.heading);
 }
 
-void update_asteroids(Asteroid asteroids[], float frame_delta) {
+void update_asteroids(AsteroidContainer asteroid_containers[], float frame_delta) {
 	for (int i = 0; i < ASTEROID_MAX; ++i) {
-		update_asteroid(asteroids + i, frame_delta);
+		update_asteroid(asteroid_containers + i, frame_delta);
 	}
 }
 
@@ -524,4 +526,17 @@ WorldCoordinates subtract_world_coordinates(WorldCoordinates* first, WorldCoordi
 
 float absolute_value_of_world_coordinates(WorldCoordinates* world_coordinates) {
 	return sqrt(world_coordinates->x * world_coordinates->x + world_coordinates->y * world_coordinates->y);
+}
+
+AsteroidContainer initialize_asteroid_container(Asteroid* asteroid) {
+	AsteroidContainer asteroid_container = {
+		.is_in_use = true,
+		.asteroid = *asteroid,
+	};
+	return asteroid_container;
+}
+
+void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* asteroid) {
+	if (asteroid_container->is_in_use) return;
+	asteroid_container->asteroid = *asteroid;
 }
