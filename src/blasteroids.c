@@ -137,6 +137,9 @@ float absolute_value_of_world_coordinates(WorldCoordinates* world_coordinates);
 AsteroidContainer initialize_asteroid_container(Asteroid* asteroid);
 void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* asteroid);
 void drain_asteroid_container(AsteroidContainer* asteroid_container);
+void draw_line_in_display_coordinates(DisplayCoordinates* start, DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness);
+void draw_line_in_world_coordinates(WorldCoordinates* start, WorldCoordinates* end, ALLEGRO_COLOR color, float thickness);
+void draw_circle_in_display_coordinates(DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness);
 
 int main(int argc, char** argv) {
 
@@ -358,6 +361,11 @@ void draw_spaceship(Spaceship* spaceship) {
 	draw_line_in_display_coordinates(&spaceship->vertices[0], &spaceship->vertices[1], spaceship->color, SPACESHIP_LINE_THICKNESS);
 	draw_line_in_display_coordinates(&spaceship->vertices[1], &spaceship->vertices[2], spaceship->color, SPACESHIP_LINE_THICKNESS);
 	draw_line_in_display_coordinates(&spaceship->vertices[2], &spaceship->vertices[0], spaceship->color, SPACESHIP_LINE_THICKNESS);
+
+	al_identity_transform(&transform);
+	al_use_transform(&transform);
+	DisplayCoordinates hitbox_coordinates = map_world_coordinates_to_display_coordinates(&spaceship->hitbox.center);
+	draw_circle_in_display_coordinates(&hitbox_coordinates, spaceship->hitbox.radius, al_color_name("red"), 2.0f);
 }
 
 void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_delta) {
@@ -376,10 +384,10 @@ void update_spaceship(Spaceship* spaceship, KeyState key_states[], float frame_d
 		spaceship->heading = (spaceship->heading - 0.1f * (1.0f + frame_delta));
 	}
 
+	map_world_coordinates_to_screen(&spaceship->world_coordinates, spaceship->heading);
+
 	spaceship->hitbox.center.x = spaceship->world_coordinates.x;
 	spaceship->hitbox.center.y = spaceship->world_coordinates.y;
-
-	map_world_coordinates_to_screen(&spaceship->world_coordinates, spaceship->heading);
 }
 
 void map_world_coordinates_to_screen(WorldCoordinates* world_coordinates, float angle) {
@@ -484,6 +492,11 @@ void draw_asteroid(AsteroidContainer* asteroid_container) {
 	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[1], &asteroid_container->asteroid.vertices[2], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
 	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[2], &asteroid_container->asteroid.vertices[3], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
 	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[3], &asteroid_container->asteroid.vertices[0], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+
+	al_identity_transform(&transform);
+	al_use_transform(&transform);
+	DisplayCoordinates hitbox_coordinates = map_world_coordinates_to_display_coordinates(&asteroid_container->asteroid.hitbox.center);
+	draw_circle_in_display_coordinates(&hitbox_coordinates, asteroid_container->asteroid.hitbox.radius, al_color_name("green"), 2.0f);
 }
 
 void draw_asteroids(AsteroidContainer asteroid_containers[]) {
@@ -497,10 +510,10 @@ void update_asteroid(AsteroidContainer* asteroid_container, float frame_delta) {
 	asteroid_container->asteroid.world_coordinates.y += (float)sin(asteroid_container->asteroid.heading) * (1.0f + frame_delta);
 	asteroid_container->asteroid.rotation_angle += asteroid_container->asteroid.angle_velocity;
 
+	map_world_coordinates_to_screen(&asteroid_container->asteroid.world_coordinates, asteroid_container->asteroid.heading);
+
 	asteroid_container->asteroid.hitbox.center.x = asteroid_container->asteroid.world_coordinates.x;
 	asteroid_container->asteroid.hitbox.center.y = asteroid_container->asteroid.world_coordinates.y;
-
-	map_world_coordinates_to_screen(&asteroid_container->asteroid.world_coordinates, asteroid_container->asteroid.heading);
 }
 
 void update_asteroids(AsteroidContainer asteroid_containers[], float frame_delta) {
@@ -539,4 +552,8 @@ AsteroidContainer initialize_asteroid_container(Asteroid* asteroid) {
 void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* asteroid) {
 	if (asteroid_container->is_in_use) return;
 	asteroid_container->asteroid = *asteroid;
+}
+
+void draw_circle_in_display_coordinates(DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness) {
+	al_draw_circle(center->x, center->y, radius, color, thickness);
 }
