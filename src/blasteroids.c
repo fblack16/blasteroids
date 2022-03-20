@@ -7,48 +7,50 @@
 #include <allegro5/allegro_color.h>
 #include <allegro5/allegro_primitives.h>
 
-#define DISPLAY_WIDTH 640
-#define DISPLAY_HEIGHT 480
-#define DISPLAY_OFFSET_X (DISPLAY_WIDTH / 2)
-#define DISPLAY_OFFSET_Y (DISPLAY_HEIGHT / 2)
-#define FPS 30
+struct display_coordinates {
+	float x;
+	float y;
+};
+typedef struct display_coordinates DisplayCoordinates;
 
-#define SPACESHIP_SCALE_FACTOR 20.0f
-#define SPACESHIP_COLOR "hotpink"
-#define SPACESHIP_VERTICES { \
-	{ .x = -0.5f, .y = -0.5f }, \
-	{ .x = 0.5f, .y = 0.0f }, \
-	{ .x = -0.5f, .y = 0.5f }, \
-}
-#define SPACESHIP_LINE_THICKNESS 2.0f
+const int DISPLAY_WIDTH = 640;
+const int DISPLAY_HEIGHT = 480;
+const int DISPLAY_OFFSET_X = (DISPLAY_WIDTH / 2);
+const int DISPLAY_OFFSET_Y = (DISPLAY_HEIGHT / 2);
+const int FPS = 30;
 
-#define ASTEROID_SCALE_FACTOR 20.0f
-#define ASTEROID_COLOR "white"
-#define ASTEROID_VERTICES { \
-	{ .x = -0.5f, .y = 0.0f }, \
-	{ .x = 0.0f, .y = 0.5f }, \
-	{ .x = 0.5f, .y = 0.0f }, \
-	{ .x = 0.0f, .y = -0.5f }, \
-}
-#define ASTEROID_LINE_THICKNESS 2.0f
+const float SPACESHIP_SCALE_FACTOR = 20.0f;
+const char SPACESHIP_COLOR[] = "hotpink";
+#define NUMBER_OF_SPACESHIP_VERTICES 3
+const DisplayCoordinates SPACESHIP_VERTICES[NUMBER_OF_SPACESHIP_VERTICES] = {
+	{ .x = -0.5f * SPACESHIP_SCALE_FACTOR, .y = -0.5f * SPACESHIP_SCALE_FACTOR},
+	{ .x = 0.5f * SPACESHIP_SCALE_FACTOR, .y = 0.0f * SPACESHIP_SCALE_FACTOR},
+	{ .x = -0.5f * SPACESHIP_SCALE_FACTOR, .y = 0.5f * SPACESHIP_SCALE_FACTOR},
+};
+const float SPACESHIP_LINE_THICKNESS = 2.0f;
+
+const float ASTEROID_SCALE_FACTOR = 20.0f;
+const char ASTEROID_COLOR[] = "white";
+#define NUMBER_OF_ASTEROID_VERTICES 4
+const DisplayCoordinates ASTEROID_VERTICES[NUMBER_OF_ASTEROID_VERTICES] = {
+	{ .x = -0.5f * ASTEROID_SCALE_FACTOR, .y = 0.0f * ASTEROID_SCALE_FACTOR},
+	{ .x = 0.0f * ASTEROID_SCALE_FACTOR, .y = 0.5f * ASTEROID_SCALE_FACTOR},
+	{ .x = 0.5f * ASTEROID_SCALE_FACTOR, .y = 0.0f * ASTEROID_SCALE_FACTOR},
+	{ .x = 0.0f * ASTEROID_SCALE_FACTOR, .y = -0.5f * ASTEROID_SCALE_FACTOR},
+};
+const float ASTEROID_LINE_THICKNESS = 2.0f;
 #define ASTEROID_MAX 10
 
-#define FORWARD ALLEGRO_KEY_W
-#define BACK ALLEGRO_KEY_S
-#define LEFT ALLEGRO_KEY_A
-#define RIGHT ALLEGRO_KEY_D
+const int FORWARD = ALLEGRO_KEY_W;
+const int BACK = ALLEGRO_KEY_S;
+const int LEFT = ALLEGRO_KEY_A;
+const int RIGHT = ALLEGRO_KEY_D;
 
 struct keystate {
 	unsigned int is_pressed: 1;
 	unsigned int needs_processing: 1;
 };
 typedef struct keystate KeyState;
-
-struct display_coordinates {
-	float x;
-	float y;
-};
-typedef struct display_coordinates DisplayCoordinates;
 
 struct world_coordinates {
 	float x;
@@ -72,7 +74,7 @@ struct spaceship {
 	WorldCoordinates world_coordinates;
 	float heading;
 	ALLEGRO_COLOR color;
-	DisplayCoordinates vertices[3];
+	const DisplayCoordinates* vertices;
 	Circle hitbox;
 };
 typedef struct spaceship Spaceship;
@@ -83,7 +85,7 @@ struct asteroid {
 	float rotation_angle;
 	float angle_velocity;
 	ALLEGRO_COLOR color;
-	DisplayCoordinates vertices[4];
+	const DisplayCoordinates* vertices;
 	Circle hitbox;
 };
 typedef struct asteroid Asteroid;
@@ -104,7 +106,7 @@ struct game_state {
 };
 typedef struct game_state GameState;
 
-void error(char* message);
+void error(const char* message);
 void initialize_allegro();
 void initialize_allegro_primitives();
 void initialize_keyboard();
@@ -137,9 +139,9 @@ float absolute_value_of_world_coordinates(WorldCoordinates* world_coordinates);
 AsteroidContainer initialize_asteroid_container(Asteroid* asteroid);
 void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* asteroid);
 void drain_asteroid_container(AsteroidContainer* asteroid_container);
-void draw_line_in_display_coordinates(DisplayCoordinates* start, DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness);
-void draw_line_in_world_coordinates(WorldCoordinates* start, WorldCoordinates* end, ALLEGRO_COLOR color, float thickness);
-void draw_circle_in_display_coordinates(DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness);
+void draw_line_in_display_coordinates(const DisplayCoordinates* start, const DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness);
+void draw_line_in_world_coordinates(const WorldCoordinates* start, const WorldCoordinates* end, ALLEGRO_COLOR color, float thickness);
+void draw_circle_in_display_coordinates(const DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness);
 
 int main(int argc, char** argv) {
 
@@ -172,8 +174,6 @@ int main(int argc, char** argv) {
 				update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
 				update_asteroids(game_state.asteroid_containers, (float)frame_delta);
 				unset_needs_processing(game_state.key_states);
-
-				//printf("Red is %i, green is %i, blue is %i\n", red, green, blue);
 
 				needs_redraw = true;
 				frame_delta = 0.0; // reset frame delta
@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
 	al_uninstall_system();
 }
 
-void error(char* message) {
+void error(const char* message) {
 	fprintf(stderr, "%s: %s\n", message, strerror(errno));
 }
 
@@ -318,11 +318,11 @@ void unset_needs_processing(KeyState key_states[]) {
 	}
 }
 
-void draw_line_in_display_coordinates(DisplayCoordinates* start, DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness) {
+void draw_line_in_display_coordinates(const DisplayCoordinates* start, const DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness) {
 	al_draw_line(start->x, start->y, end->x, end->y, color, thickness);
 }
 
-void draw_line_in_world_coordinates(WorldCoordinates* start, WorldCoordinates* end, ALLEGRO_COLOR color, float thickness) {
+void draw_line_in_world_coordinates(const WorldCoordinates* start, const WorldCoordinates* end, ALLEGRO_COLOR color, float thickness) {
 	al_draw_line(start->x, start->y, end->x, end->y, color, thickness);
 }
 
@@ -341,13 +341,6 @@ Spaceship initialize_spaceship() {
 		}
 	};
 
-	ALLEGRO_TRANSFORM transform;
-	al_identity_transform(&transform);
-	al_scale_transform(&transform, SPACESHIP_SCALE_FACTOR, SPACESHIP_SCALE_FACTOR);
-	al_transform_coordinates(&transform, &spaceship.vertices[0].x, &spaceship.vertices[0].y);
-	al_transform_coordinates(&transform, &spaceship.vertices[1].x, &spaceship.vertices[1].y);
-	al_transform_coordinates(&transform, &spaceship.vertices[2].x, &spaceship.vertices[2].y);
-
 	return spaceship;
 }
 
@@ -358,9 +351,11 @@ void draw_spaceship(Spaceship* spaceship) {
 	al_rotate_transform(&transform, -spaceship->heading); // need to take the negative of heading since drawing is in display coordinates
 	al_translate_transform(&transform, display_coordinates.x, display_coordinates.y);
 	al_use_transform(&transform);
-	draw_line_in_display_coordinates(&spaceship->vertices[0], &spaceship->vertices[1], spaceship->color, SPACESHIP_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&spaceship->vertices[1], &spaceship->vertices[2], spaceship->color, SPACESHIP_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&spaceship->vertices[2], &spaceship->vertices[0], spaceship->color, SPACESHIP_LINE_THICKNESS);
+
+	draw_line_in_display_coordinates(&spaceship->vertices[NUMBER_OF_SPACESHIP_VERTICES-1], &spaceship->vertices[0], spaceship->color, SPACESHIP_LINE_THICKNESS);
+	for (int i = 0; i < NUMBER_OF_SPACESHIP_VERTICES - 1; ++i) {
+		draw_line_in_display_coordinates(&spaceship->vertices[i], &spaceship->vertices[i+1], spaceship->color, SPACESHIP_LINE_THICKNESS);
+	}
 
 	al_identity_transform(&transform);
 	al_use_transform(&transform);
@@ -470,13 +465,13 @@ Asteroid initialize_asteroid() {
 		},
 	};
 
-	ALLEGRO_TRANSFORM transform;
-	al_identity_transform(&transform);
-	al_scale_transform(&transform, ASTEROID_SCALE_FACTOR, ASTEROID_SCALE_FACTOR);
-	al_transform_coordinates(&transform, &asteroid.vertices[0].x, &asteroid.vertices[0].y);
-	al_transform_coordinates(&transform, &asteroid.vertices[1].x, &asteroid.vertices[1].y);
-	al_transform_coordinates(&transform, &asteroid.vertices[2].x, &asteroid.vertices[2].y);
-	al_transform_coordinates(&transform, &asteroid.vertices[3].x, &asteroid.vertices[3].y);
+	//ALLEGRO_TRANSFORM transform;
+	//al_identity_transform(&transform);
+	//al_scale_transform(&transform, ASTEROID_SCALE_FACTOR, ASTEROID_SCALE_FACTOR);
+
+	//for (int i = 0; i < NUMBER_OF_ASTEROID_VERTICES; ++i) {
+	//	al_transform_coordinates(&transform, &asteroid.vertices[i].x, &asteroid.vertices[i].y);
+	//}
 
 	return asteroid;
 }
@@ -488,10 +483,11 @@ void draw_asteroid(AsteroidContainer* asteroid_container) {
 	al_rotate_transform(&transform, asteroid_container->asteroid.rotation_angle);
 	al_translate_transform(&transform, display_coordinates.x, display_coordinates.y);
 	al_use_transform(&transform);
-	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[0], &asteroid_container->asteroid.vertices[1], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[1], &asteroid_container->asteroid.vertices[2], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[2], &asteroid_container->asteroid.vertices[3], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
-	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[3], &asteroid_container->asteroid.vertices[0], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+
+	draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[NUMBER_OF_ASTEROID_VERTICES-1], &asteroid_container->asteroid.vertices[0], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+	for (int i = 0; i < NUMBER_OF_ASTEROID_VERTICES - 1; ++i) {
+		draw_line_in_display_coordinates(&asteroid_container->asteroid.vertices[i], &asteroid_container->asteroid.vertices[i+1], asteroid_container->asteroid.color, ASTEROID_LINE_THICKNESS);
+	}
 
 	al_identity_transform(&transform);
 	al_use_transform(&transform);
@@ -554,6 +550,6 @@ void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* as
 	asteroid_container->asteroid = *asteroid;
 }
 
-void draw_circle_in_display_coordinates(DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness) {
+void draw_circle_in_display_coordinates(const DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness) {
 	al_draw_circle(center->x, center->y, radius, color, thickness);
 }
