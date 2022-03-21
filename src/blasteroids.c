@@ -41,10 +41,22 @@ const DisplayCoordinates ASTEROID_VERTICES[NUMBER_OF_ASTEROID_VERTICES] = {
 const float ASTEROID_LINE_THICKNESS = 2.0f;
 #define ASTEROID_MAX 10
 
+const float BLAST_SCALE_FACTOR = 20.0f;
+const char BLAST_COLOR[] = "red";
+#define NUMBER_OF_BLAST_VERTICES 2
+const DisplayCoordinates BLAST_VERTICES[NUMBER_OF_BLAST_VERTICES] = {
+	{ .x = 0.0f * BLAST_SCALE_FACTOR, .y = 0.0f * BLAST_SCALE_FACTOR},
+	{ .x = 1.0f * BLAST_SCALE_FACTOR, .y = 0.0f * BLAST_SCALE_FACTOR},
+};
+const float BLAST_LINE_THICKNESS = 2.0f;
+#define BLAST_MAX 10
+
+
 const int FORWARD = ALLEGRO_KEY_W;
 const int BACK = ALLEGRO_KEY_S;
 const int LEFT = ALLEGRO_KEY_A;
 const int RIGHT = ALLEGRO_KEY_D;
+const int FIRE = ALLEGRO_KEY_SPACE;
 
 struct keystate {
 	unsigned int is_pressed: 1;
@@ -96,6 +108,30 @@ struct asteroid_container {
 };
 typedef struct asteroid_container AsteroidContainer;
 
+struct blast {
+	WorldCoordinates world_coordinates;
+	float heading;
+	ALLEGRO_COLOR color;
+	const DisplayCoordinates* vertices;
+	Circle hitbox;
+};
+typedef struct blast Blast;
+
+struct blast_container {
+	bool is_in_use;
+	Blast blast;
+};
+typedef struct blast_container BlastContainer;
+
+struct blast_timer {
+	ALLEGRO_EVENT_SOURCE event_source;
+};
+typedef struct blast_timer BLAST_TIMER;
+
+enum {
+	EVENT_BLAST_TIMER = 1024,
+};
+
 struct game_state {
 	ALLEGRO_DISPLAY* display_ptr;
 	ALLEGRO_EVENT_QUEUE* event_queue_ptr;
@@ -103,6 +139,7 @@ struct game_state {
 	KeyState key_states[ALLEGRO_KEY_MAX];
 	Spaceship spaceship;
 	AsteroidContainer asteroid_containers[ASTEROID_MAX];
+	BlastContainer blast_containers[BLAST_MAX];
 };
 typedef struct game_state GameState;
 
@@ -138,10 +175,19 @@ WorldCoordinates subtract_world_coordinates(WorldCoordinates* first, WorldCoordi
 float absolute_value_of_world_coordinates(WorldCoordinates* world_coordinates);
 AsteroidContainer initialize_asteroid_container(Asteroid* asteroid);
 void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* asteroid);
-void drain_asteroid_container(AsteroidContainer* asteroid_container);
 void draw_line_in_display_coordinates(const DisplayCoordinates* start, const DisplayCoordinates* end, ALLEGRO_COLOR color, float thickness);
 void draw_line_in_world_coordinates(const WorldCoordinates* start, const WorldCoordinates* end, ALLEGRO_COLOR color, float thickness);
 void draw_circle_in_display_coordinates(const DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness);
+BlastContainer initialize_blast_container(WorldCoordinates* world_coordinates, float heading);
+void fill_blast_container(BlastContainer* blast_container, Blast* blast);
+void draw_blast(BlastContainer* blast);
+void draw_blasts(BlastContainer blast_containers[]);
+void update_blast(BlastContainer* blast, float frame_delta);
+void update_blasts(BlastContainer blast_containers[], float frame_delta);
+void fire_blast(GameState* game_state);
+
+BLAST_TIMER* create_blast_timer();
+void destroy_blast_timer(BLAST_TIMER* blast_timer);
 
 int main(int argc, char** argv) {
 
@@ -158,10 +204,14 @@ int main(int argc, char** argv) {
 
 	ALLEGRO_EVENT event;
 
+	ALLEGRO_TIMER* blast_timer = al_create_timer(1.0f);
+	al_register_event_source(game_state.event_queue_ptr, al_get_timer_event_source(blast_timer));
+
 	bool running = true;
 	bool needs_redraw = true;
 	double frame_delta = 0.0;
 	al_start_timer(game_state.timer_ptr);
+	al_start_timer(blast_timer);
 
 	while (running) {
 		al_wait_for_event(game_state.event_queue_ptr, &event);
@@ -169,14 +219,21 @@ int main(int argc, char** argv) {
 		double start_time = al_get_time();
 		switch (event.type) {
 			case ALLEGRO_EVENT_TIMER:
-				if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_ESCAPE)) running = false;
+				if (event.timer.source == game_state.timer_ptr) {
+					if (is_pressed_or_needs_processing(game_state.key_states, ALLEGRO_KEY_ESCAPE)) running = false;
 
-				update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
-				update_asteroids(game_state.asteroid_containers, (float)frame_delta);
-				unset_needs_processing(game_state.key_states);
+					update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
+					update_asteroids(game_state.asteroid_containers, (float)frame_delta);
+					//fire_blast(&game_state);
+					update_blasts(game_state.blast_containers, (float)frame_delta);
+					unset_needs_processing(game_state.key_states);
 
-				needs_redraw = true;
-				frame_delta = 0.0; // reset frame delta
+					needs_redraw = true;
+					frame_delta = 0.0; // reset frame delta
+				}
+				if (event.timer.source == blast_timer) {
+					fire_blast(&game_state);
+				}
 				break;
 
 			case ALLEGRO_EVENT_KEY_DOWN:
@@ -204,6 +261,7 @@ int main(int argc, char** argv) {
 			al_clear_to_color(al_color_name("black"));
 			draw_spaceship(&game_state.spaceship);
 			draw_asteroids(game_state.asteroid_containers);
+			draw_blasts(game_state.blast_containers);
 			al_flip_display();
 			needs_redraw = false;
 		}
@@ -293,6 +351,11 @@ GameState initialize_game_state() {
 	for (int i = 0; i < ASTEROID_MAX; ++i) {
 		Asteroid asteroid = initialize_asteroid();
 		game_state.asteroid_containers[i] = initialize_asteroid_container(&asteroid);
+	}
+
+	BlastContainer blast_container = { .is_in_use = false };
+	for (int i = 0; i < BLAST_MAX; ++i) {
+		game_state.blast_containers[i] = blast_container;
 	}
 
 	return game_state;
@@ -552,4 +615,96 @@ void fill_asteroid_container(AsteroidContainer* asteroid_container, Asteroid* as
 
 void draw_circle_in_display_coordinates(const DisplayCoordinates* center, float radius, ALLEGRO_COLOR color, float thickness) {
 	al_draw_circle(center->x, center->y, radius, color, thickness);
+}
+
+BlastContainer initialize_blast(WorldCoordinates* world_coordinates, float heading) {
+	BlastContainer blast_container = {
+		.is_in_use = true,
+		.blast = {
+			.world_coordinates = *world_coordinates,
+			.heading = heading,
+			.color = al_color_name(BLAST_COLOR),
+			.vertices = BLAST_VERTICES,
+			.hitbox = {
+				.center = *world_coordinates,
+				.radius = 1.0f * BLAST_SCALE_FACTOR,
+			},
+		},
+	};
+	return blast_container;
+}
+
+void draw_blast(BlastContainer* blast_container) {
+	DisplayCoordinates display_coordinates = map_world_coordinates_to_display_coordinates(&blast_container->blast.world_coordinates);
+	ALLEGRO_TRANSFORM transform;
+	al_identity_transform(&transform);
+	al_rotate_transform(&transform, -blast_container->blast.heading); // need to use negative of heading, since y axis is inverted in display coordinates
+	al_translate_transform(&transform, display_coordinates.x, display_coordinates.y);
+	al_use_transform(&transform);
+
+	for (int i = 0; i < NUMBER_OF_BLAST_VERTICES - 1; ++i) {
+		draw_line_in_display_coordinates(&blast_container->blast.vertices[i], &blast_container->blast.vertices[i+1], blast_container->blast.color, BLAST_LINE_THICKNESS);
+	}
+
+	al_identity_transform(&transform);
+	al_use_transform(&transform);
+	DisplayCoordinates hitbox_coordinates = map_world_coordinates_to_display_coordinates(&blast_container->blast.hitbox.center);
+	draw_circle_in_display_coordinates(&hitbox_coordinates, blast_container->blast.hitbox.radius, al_color_name("green"), 2.0f);
+}
+
+void draw_blasts(BlastContainer blast_containers[]) {
+	for (int i = 0; i < BLAST_MAX; ++i) {
+		if (blast_containers[i].is_in_use) {
+			draw_blast(&blast_containers[i]);
+		}
+	}
+}
+
+void update_blast(BlastContainer* blast_container, float frame_delta) {
+	blast_container->blast.world_coordinates.x += (float)cos(blast_container->blast.heading) * (1.0f + frame_delta);
+	blast_container->blast.world_coordinates.y += (float)sin(blast_container->blast.heading) * (1.0f + frame_delta);
+
+	blast_container->blast.hitbox.center.x = blast_container->blast.world_coordinates.x;
+	blast_container->blast.hitbox.center.y = blast_container->blast.world_coordinates.y;
+
+	if (blast_container->blast.world_coordinates.x > DISPLAY_OFFSET_X || blast_container->blast.world_coordinates.x < -DISPLAY_OFFSET_X) {
+		blast_container->is_in_use = false;
+	}
+	if (blast_container->blast.world_coordinates.y > DISPLAY_OFFSET_Y || blast_container->blast.world_coordinates.y < -DISPLAY_OFFSET_Y) {
+		blast_container->is_in_use = false;
+	}
+}
+
+void update_blasts(BlastContainer blast_containers[], float frame_delta) {
+	for (int i = 0; i < BLAST_MAX; ++i) {
+		if (blast_containers[i].is_in_use) {
+			update_blast(&blast_containers[i], frame_delta);
+		}
+	}
+}
+
+void fire_blast(GameState* game_state) {
+	if (is_pressed_or_needs_processing(game_state->key_states, FIRE)) {
+		BlastContainer blast_container = initialize_blast(&game_state->spaceship.world_coordinates, game_state->spaceship.heading);
+		for (int i = 0; i < BLAST_MAX; ++i) {
+			if (!game_state->blast_containers[i].is_in_use) {
+				game_state->blast_containers[i] = blast_container;
+			}
+		}
+	}
+}
+
+BLAST_TIMER* create_blast_timer() {
+	BLAST_TIMER* blast_timer = malloc(sizeof(BLAST_TIMER));
+
+	if (blast_timer) {
+		al_init_user_event_source(&blast_timer->event_source);
+	}
+
+	return blast_timer;
+}
+
+void destroy_blast_timer(BLAST_TIMER* blast_timer) {
+	al_destroy_user_event_source(&blast_timer->event_source);
+	free(blast_timer);
 }
