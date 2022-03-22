@@ -186,6 +186,7 @@ void draw_blasts(BlastContainer blast_containers[]);
 void update_blast(BlastContainer* blast, float frame_delta);
 void update_blasts(BlastContainer blast_containers[], float frame_delta);
 void fire_blast(GameState* game_state);
+void check_collision_between_blasts_and_asteroids(GameState* game_state);
 
 BLAST_TIMER* create_blast_timer();
 void destroy_blast_timer(BLAST_TIMER* blast_timer);
@@ -225,8 +226,10 @@ int main(int argc, char** argv) {
 
 					update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
 					update_asteroids(game_state.asteroid_containers, (float)frame_delta);
-					fire_blast(&game_state);
+					//fire_blast(&game_state);
 					update_blasts(game_state.blast_containers, (float)frame_delta);
+					fire_blast(&game_state);
+					check_collision_between_blasts_and_asteroids(&game_state);
 					unset_needs_processing(game_state.key_states);
 
 					needs_redraw = true;
@@ -710,4 +713,20 @@ BLAST_TIMER* create_blast_timer() {
 void destroy_blast_timer(BLAST_TIMER* blast_timer) {
 	al_destroy_user_event_source(&blast_timer->event_source);
 	free(blast_timer);
+}
+
+void check_collision_between_blasts_and_asteroids(GameState* game_state) {
+	for (int i = 0; i < BLAST_MAX; ++i) {
+		if (game_state->blast_containers[i].is_in_use) {
+			for (int j = 0; j < ASTEROID_MAX; ++j) {
+				if (game_state->asteroid_containers[j].is_in_use) {
+					bool is_collision = circles_collide(&game_state->blast_containers->blast.hitbox, &game_state->asteroid_containers->asteroid.hitbox);
+					if (is_collision) {
+						game_state->blast_containers[i].is_in_use = false;
+						game_state->asteroid_containers[j].is_in_use = false;
+					}
+				}
+			}
+		}
+	}
 }
