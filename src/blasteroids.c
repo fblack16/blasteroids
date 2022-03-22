@@ -49,7 +49,7 @@ const DisplayCoordinates BLAST_VERTICES[NUMBER_OF_BLAST_VERTICES] = {
 	{ .x = 1.0f * BLAST_SCALE_FACTOR, .y = 0.0f * BLAST_SCALE_FACTOR},
 };
 const float BLAST_LINE_THICKNESS = 2.0f;
-#define BLAST_MAX 10
+#define BLAST_MAX 100
 
 
 const int FORWARD = ALLEGRO_KEY_W;
@@ -140,6 +140,7 @@ struct game_state {
 	Spaceship spaceship;
 	AsteroidContainer asteroid_containers[ASTEROID_MAX];
 	BlastContainer blast_containers[BLAST_MAX];
+	bool is_blast_on_cooldown;
 };
 typedef struct game_state GameState;
 
@@ -204,7 +205,7 @@ int main(int argc, char** argv) {
 
 	ALLEGRO_EVENT event;
 
-	ALLEGRO_TIMER* blast_timer = al_create_timer(1.0f);
+	ALLEGRO_TIMER* blast_timer = al_create_timer(0.5f);
 	al_register_event_source(game_state.event_queue_ptr, al_get_timer_event_source(blast_timer));
 
 	bool running = true;
@@ -224,7 +225,7 @@ int main(int argc, char** argv) {
 
 					update_spaceship(&game_state.spaceship, game_state.key_states, (float)frame_delta);
 					update_asteroids(game_state.asteroid_containers, (float)frame_delta);
-					//fire_blast(&game_state);
+					fire_blast(&game_state);
 					update_blasts(game_state.blast_containers, (float)frame_delta);
 					unset_needs_processing(game_state.key_states);
 
@@ -232,7 +233,7 @@ int main(int argc, char** argv) {
 					frame_delta = 0.0; // reset frame delta
 				}
 				if (event.timer.source == blast_timer) {
-					fire_blast(&game_state);
+					game_state.is_blast_on_cooldown = false;
 				}
 				break;
 
@@ -341,6 +342,7 @@ GameState initialize_game_state() {
 		.event_queue_ptr = initialize_event_queue(),
 		.timer_ptr = initialize_timer(),
 		.spaceship = initialize_spaceship(),
+		.is_blast_on_cooldown = false,
 	};
 
 	KeyState key_state = {.is_pressed = 0, .needs_processing = 0};
@@ -687,8 +689,9 @@ void fire_blast(GameState* game_state) {
 	if (is_pressed_or_needs_processing(game_state->key_states, FIRE)) {
 		BlastContainer blast_container = initialize_blast(&game_state->spaceship.world_coordinates, game_state->spaceship.heading);
 		for (int i = 0; i < BLAST_MAX; ++i) {
-			if (!game_state->blast_containers[i].is_in_use) {
+			if (!game_state->blast_containers[i].is_in_use && !game_state->is_blast_on_cooldown) {
 				game_state->blast_containers[i] = blast_container;
+				game_state->is_blast_on_cooldown = true;
 			}
 		}
 	}
