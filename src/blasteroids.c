@@ -39,7 +39,7 @@ const DisplayCoordinates ASTEROID_VERTICES[NUMBER_OF_ASTEROID_VERTICES] = {
 	{ .x = 0.0f * ASTEROID_SCALE_FACTOR, .y = -0.5f * ASTEROID_SCALE_FACTOR},
 };
 const float ASTEROID_LINE_THICKNESS = 2.0f;
-#define ASTEROID_MAX 1
+#define ASTEROID_MAX 10
 
 const float BLAST_SCALE_FACTOR = 20.0f;
 const char BLAST_COLOR[] = "red";
@@ -49,7 +49,8 @@ const DisplayCoordinates BLAST_VERTICES[NUMBER_OF_BLAST_VERTICES] = {
 	{ .x = 1.0f * BLAST_SCALE_FACTOR, .y = 0.0f * BLAST_SCALE_FACTOR},
 };
 const float BLAST_LINE_THICKNESS = 2.0f;
-#define BLAST_MAX 1
+const float BLAST_VELOCITY = 2.0f;
+#define BLAST_MAX 10
 
 
 const int FORWARD = ALLEGRO_KEY_W;
@@ -141,6 +142,7 @@ struct game_state {
 	AsteroidContainer asteroid_containers[ASTEROID_MAX];
 	BlastContainer blast_containers[BLAST_MAX];
 	bool is_blast_on_cooldown;
+	bool is_asteroid_creation_on_cooldown;
 };
 typedef struct game_state GameState;
 
@@ -190,6 +192,7 @@ void update_blast(BlastContainer* blast, float frame_delta);
 void update_blasts(BlastContainer blast_containers[], float frame_delta);
 void fire_blast(GameState* game_state);
 void check_collision_between_blasts_and_asteroids(GameState* game_state);
+void create_new_asteroids(GameState* game_state);
 
 BLAST_TIMER* create_blast_timer();
 void destroy_blast_timer(BLAST_TIMER* blast_timer);
@@ -212,11 +215,15 @@ int main(int argc, char** argv) {
 	ALLEGRO_TIMER* blast_timer = al_create_timer(0.5f);
 	al_register_event_source(game_state.event_queue_ptr, al_get_timer_event_source(blast_timer));
 
+	ALLEGRO_TIMER* asteroid_creation_timer = al_create_timer(2.0f);
+	al_register_event_source(game_state.event_queue_ptr, al_get_timer_event_source(asteroid_creation_timer));
+
 	bool running = true;
 	bool needs_redraw = true;
 	double frame_delta = 0.0;
 	al_start_timer(game_state.timer_ptr);
 	al_start_timer(blast_timer);
+	al_start_timer(asteroid_creation_timer);
 
 	while (running) {
 		al_wait_for_event(game_state.event_queue_ptr, &event);
@@ -233,6 +240,7 @@ int main(int argc, char** argv) {
 					update_blasts(game_state.blast_containers, (float)frame_delta);
 					fire_blast(&game_state);
 					check_collision_between_blasts_and_asteroids(&game_state);
+					create_new_asteroids(&game_state);
 					unset_needs_processing(game_state.key_states);
 
 					needs_redraw = true;
@@ -240,6 +248,9 @@ int main(int argc, char** argv) {
 				}
 				if (event.timer.source == blast_timer) {
 					game_state.is_blast_on_cooldown = false;
+				}
+				if (event.timer.source == asteroid_creation_timer) {
+					game_state.is_asteroid_creation_on_cooldown = false;
 				}
 				break;
 
@@ -279,7 +290,7 @@ int main(int argc, char** argv) {
 			frame_delta = frame_time - ALLEGRO_BPM_TO_SECS(FPS);
 			printf("Frame delta is %.4f\n", frame_delta);
 		}
-		//printf("Frame time: %.4f\n", frame_time);
+		printf("Frame time: %.4f\n", frame_time);
 	}
 
 	destroy_game_state(&game_state);
@@ -349,6 +360,7 @@ GameState initialize_game_state() {
 		.timer_ptr = initialize_timer(),
 		.spaceship = initialize_spaceship(),
 		.is_blast_on_cooldown = false,
+		.is_asteroid_creation_on_cooldown = false,
 	};
 
 	KeyState key_state = {.is_pressed = 0, .needs_processing = 0};
@@ -522,10 +534,24 @@ WorldCoordinates map_mathematical_coordinates_to_world_coordinates(MathematicalC
 }
 
 Asteroid initialize_asteroid() {
-	WorldCoordinates world_coordinates = {
-		.x = (float)(rand() % DISPLAY_WIDTH - DISPLAY_OFFSET_X),
-		.y = (float)(rand() % DISPLAY_HEIGHT - DISPLAY_OFFSET_Y),
-	};
+	// Should be an enum
+	int direction = rand() % 4; // 0, 1, 2, 3
+	WorldCoordinates world_coordinates = { .x = 0.0f, .y = 0.0f };
+	switch (direction) {
+		case 0:
+			world_coordinates.x = 10.0f - DISPLAY_OFFSET_X;
+			world_coordinates.y = (float)(rand() % DISPLAY_HEIGHT - DISPLAY_OFFSET_Y);
+		case 1:
+			world_coordinates.x = DISPLAY_OFFSET_X - 10.0f;
+			world_coordinates.y = (float)(rand() % DISPLAY_HEIGHT - DISPLAY_OFFSET_Y);
+		case 2:
+			world_coordinates.x = (float)(rand() % DISPLAY_WIDTH - DISPLAY_OFFSET_X);
+			world_coordinates.y = 10.0f - DISPLAY_OFFSET_Y;
+		case 3:
+			world_coordinates.x = (float)(rand() % DISPLAY_WIDTH - DISPLAY_OFFSET_X);
+			world_coordinates.y = DISPLAY_OFFSET_Y - 10.0f;
+	}
+
 	Asteroid asteroid = {
 		.world_coordinates = world_coordinates,
 		.heading = (float)(rand() % 36),
@@ -538,14 +564,6 @@ Asteroid initialize_asteroid() {
 			.radius = 1.0f * ASTEROID_SCALE_FACTOR,
 		},
 	};
-
-	//ALLEGRO_TRANSFORM transform;
-	//al_identity_transform(&transform);
-	//al_scale_transform(&transform, ASTEROID_SCALE_FACTOR, ASTEROID_SCALE_FACTOR);
-
-	//for (int i = 0; i < NUMBER_OF_ASTEROID_VERTICES; ++i) {
-	//	al_transform_coordinates(&transform, &asteroid.vertices[i].x, &asteroid.vertices[i].y);
-	//}
 
 	return asteroid;
 }
@@ -600,8 +618,8 @@ bool circles_collide_world_coordinates(Circle* first, Circle* second) {
 	WorldCoordinates difference_of_centers = subtract_world_coordinates(&first->center, &second->center);
 	float distance_of_centers = absolute_value_of_world_coordinates(&difference_of_centers);
 	float sum_of_radii = first->radius + second->radius;
-	printf("Sum of radii is %f\n", sum_of_radii);
-	printf("Distance of centers is %f\n", distance_of_centers);
+	//printf("Sum of radii is %f\n", sum_of_radii);
+	//printf("Distance of centers is %f\n", distance_of_centers);
 	return distance_of_centers < sum_of_radii;
 }
 
@@ -612,8 +630,8 @@ bool circles_collide_display_coordinates(Circle* first, Circle* second) {
 	DisplayCoordinates difference_of_centers = subtract_display_coordinates(&first_center_in_display_coordinates, &second_center_in_display_coordinates);
 	float distance_of_centers = absolute_value_of_display_coordinates(&difference_of_centers);
 	float sum_of_radii = first->radius + second->radius;
-	printf("Sum of radii is %f\n", sum_of_radii);
-	printf("Distance of centers is %f\n", distance_of_centers);
+	//printf("Sum of radii is %f\n", sum_of_radii);
+	//printf("Distance of centers is %f\n", distance_of_centers);
 	return distance_of_centers < sum_of_radii;
 }
 
@@ -702,8 +720,8 @@ void draw_blasts(BlastContainer blast_containers[]) {
 }
 
 void update_blast(BlastContainer* blast_container, float frame_delta) {
-	blast_container->blast.world_coordinates.x += (float)cos(blast_container->blast.heading) * (1.0f + frame_delta);
-	blast_container->blast.world_coordinates.y += (float)sin(blast_container->blast.heading) * (1.0f + frame_delta);
+	blast_container->blast.world_coordinates.x += (float)cos(blast_container->blast.heading) * (1.0f + frame_delta) * BLAST_VELOCITY;
+	blast_container->blast.world_coordinates.y += (float)sin(blast_container->blast.heading) * (1.0f + frame_delta) * BLAST_VELOCITY;
 
 	blast_container->blast.hitbox.center.x = blast_container->blast.world_coordinates.x;
 	blast_container->blast.hitbox.center.y = blast_container->blast.world_coordinates.y;
@@ -756,13 +774,25 @@ void check_collision_between_blasts_and_asteroids(GameState* game_state) {
 		if (game_state->blast_containers[i].is_in_use) {
 			for (int j = 0; j < ASTEROID_MAX; ++j) {
 				if (game_state->asteroid_containers[j].is_in_use) {
-					bool is_collision = circles_collide_world_coordinates(&game_state->blast_containers->blast.hitbox, &game_state->asteroid_containers->asteroid.hitbox);
+					bool is_collision = circles_collide_world_coordinates(&game_state->blast_containers[i].blast.hitbox, &game_state->asteroid_containers[j].asteroid.hitbox);
 					if (is_collision) {
-						printf("Collision happened!\n");
+						//printf("Collision happened!\n");
 						game_state->blast_containers[i].is_in_use = false;
 						game_state->asteroid_containers[j].is_in_use = false;
 					}
 				}
+			}
+		}
+	}
+}
+
+void create_new_asteroids(GameState* game_state) {
+	if (!game_state->is_asteroid_creation_on_cooldown) {
+		for (int i = 0; i < ASTEROID_MAX; ++i) {
+			if (!game_state->asteroid_containers[i].is_in_use) {
+				Asteroid asteroid = initialize_asteroid();
+				game_state->asteroid_containers[i] = initialize_asteroid_container(&asteroid);
+				game_state->is_asteroid_creation_on_cooldown = true;
 			}
 		}
 	}
